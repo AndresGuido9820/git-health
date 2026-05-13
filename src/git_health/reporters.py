@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 
 from git_health.models import CheckResult, ScanResult
@@ -35,3 +36,28 @@ def render_text(result: ScanResult) -> str:
 
     return "\n".join(lines).rstrip()
 
+
+def render_json(result: ScanResult) -> str:
+    payload = {
+        "root": result.root,
+        "score": result.score,
+        "summary": {
+            "total": len(result.checks),
+            "passed": sum(1 for check in result.checks if check.passed),
+            "failed": len(result.failed_checks),
+        },
+        "checks": [
+            {
+                "id": check.id,
+                "title": check.title,
+                "category": check.category,
+                "passed": check.passed,
+                "weight": check.weight,
+                "severity": check.severity.value,
+                "message": check.success_message if check.passed else check.recommendation,
+                "recommendation": check.recommendation,
+            }
+            for check in result.checks
+        ],
+    }
+    return json.dumps(payload, indent=2, ensure_ascii=False)

@@ -34,6 +34,12 @@ Escanear otro proyecto:
 git-health scan ../mi-proyecto
 ```
 
+Salida JSON para CI, bots o dashboards:
+
+```bash
+git-health scan . --format json
+```
+
 Salida esperada:
 
 ```txt
@@ -89,7 +95,6 @@ pytest
 
 ## Roadmap
 
-- Salida JSON para CI.
 - Comando `git-health fix` para crear plantillas faltantes.
 - Checks especificos para Python, Node y notebooks.
 - Integracion con GitHub API para leer topics, descripcion y releases.
