@@ -9,6 +9,6 @@ All notable changes to this project will be documented here.
 - Initial `git-health scan` command.
 - Weighted repository health score.
 - Text reporter grouped by category.
+- JSON output for automation with `git-health scan --format json`.
 - Checks for README, license, CI, tests, contribution files, templates and sensitive files.
 - Pytest and Ruff based CI.
-
