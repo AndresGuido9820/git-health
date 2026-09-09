@@ -40,7 +40,7 @@ Salida JSON para CI, bots o dashboards:
 git-health scan . --format json
 ```
 
-Salida esperada:
+Salida esperada en texto:
 
 ```txt
 Git Health Score: 7.6/10
@@ -52,6 +52,28 @@ OK   CI                     El proyecto tiene GitHub Actions.
 
 Recommended next steps:
 1. Agrega CONTRIBUTING.md con flujo de fork, ramas, commits y PRs.
+```
+
+Forma de la salida JSON (recortada):
+
+```json
+{
+  "root": "/home/user/project",
+  "score": 7.6,
+  "summary": {"total": 14, "passed": 11, "failed": 3},
+  "checks": [
+    {
+      "id": "readme",
+      "title": "README",
+      "category": "presentation",
+      "passed": true,
+      "weight": 12,
+      "severity": "critical",
+      "message": "El proyecto tiene README.",
+      "recommendation": "Agrega un README con descripcion, instalacion y ejemplo de uso."
+    }
+  ]
+}
 ```
 
 ## Checks iniciales
@@ -78,7 +100,7 @@ src/git_health/
 ├── cli.py        # interfaz de comandos
 ├── fs.py         # helpers seguros de filesystem
 ├── models.py     # objetos de dominio
-├── reporters.py  # salida para humanos
+├── reporters.py  # salida texto y JSON
 ├── rules.py      # catalogo de reglas
 └── scanner.py    # orquestacion del analisis
 ```
