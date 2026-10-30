@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from git_health.fs import exists_any, file_contains, glob_any
+from git_health.fs import exists_any, file_contains, glob_any, has_pull_request_template
 from git_health.models import CheckResult, Severity
 
 Predicate = Callable[[Path], bool]
@@ -73,8 +73,8 @@ def default_rules() -> tuple[Rule, ...]:
             weight=6,
             severity=Severity.WARNING,
             success_message="El proyecto tiene plantilla de pull request.",
-            recommendation="Agrega .github/PULL_REQUEST_TEMPLATE.md con resumen y verificacion.",
-            predicate=lambda root: exists_any(root, (".github/PULL_REQUEST_TEMPLATE.md", "PULL_REQUEST_TEMPLATE.md")),
+            recommendation="Agrega una plantilla de PR en la raiz, docs/ o .github/; admite PULL_REQUEST_TEMPLATE/.",
+            predicate=has_pull_request_template,
         ),
         Rule(
             id="issue-templates",
