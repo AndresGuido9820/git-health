@@ -166,3 +166,32 @@ def test_recursive_discovery_byte_budget(tmp_path: Path) -> None:
         (directory / f"test_{i}.py").write_bytes(b" " * 1_048_576)
     result = cli(tmp_path)
     assert result.returncode == 2 and "read limit" in json.loads(result.stdout)["error"]["message"]
+
+
+def summary_cli(path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run([sys.executable, "-m", "git_health.cli", "scan", str(path), "--format", "summary", *args],
+                          capture_output=True, text=True, check=False)
+
+
+def test_summary_shows_selected_gate_and_missing_signals(tmp_path: Path) -> None:
+    (tmp_path / "README.md").write_text("## Install\n\nsetup\n\n## Usage\n\nrun\n")
+    result = summary_cli(tmp_path, "--min-score", "0")
+    assert result.returncode == 1 and "Gate: FAIL" in result.stdout
+    assert "Policy: min 0.0/10; fail: critical" in result.stdout
+    assert "License file" in result.stdout and "Other missing:" in result.stdout
+    assert str(tmp_path) not in result.stdout
+    assert all(len(line) <= 40 for line in result.stdout.splitlines())
+    relaxed = summary_cli(tmp_path, "--min-score", "0", "--fail-on", "none")
+    assert relaxed.returncode == 0 and "Gate: PASS" in relaxed.stdout
+    assert "License file" in relaxed.stdout and "fail: none" in relaxed.stdout
+    precise = summary_cli(tmp_path, "--min-score", "6.9999999", "--fail-on", "none")
+    assert "6.9999999/10" in precise.stdout
+    assert all(len(line) <= 38 for line in precise.stdout.splitlines())
+    threshold = summary_cli(tmp_path, "--min-score", "10", "--fail-on", "none")
+    assert threshold.returncode == 1 and "Gate: FAIL" in threshold.stdout
+
+
+def test_summary_scan_error_goes_to_stderr(tmp_path: Path) -> None:
+    result = summary_cli(tmp_path / "missing")
+    assert result.returncode == 2 and not result.stdout
+    assert result.stderr.startswith("Error:")

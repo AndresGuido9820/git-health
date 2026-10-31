@@ -22,7 +22,13 @@ From the root of a Git working tree:
 git-health scan .
 ```
 
-Missing signals include a suggested next step. Found signals include a path and say what remains unverified. For automation:
+Missing signals include a suggested next step. Found signals include a path and say what remains unverified. For a compact checklist and gate result, use:
+
+```bash
+git-health scan . --format summary
+```
+
+The summary shows up to three missing critical signals, counts remaining warnings and informational signals, and points to the full text or JSON report. It uses the same score, gate options, and exit codes as the other formats. For automation:
 
 ```bash
 git-health scan . --format json --min-score 7 --fail-on critical

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import textwrap
 from collections import defaultdict
 from typing import Any
 
-from git_health.models import ScanResult
+from git_health.models import ScanResult, Severity
 
 
 def render_text(result: ScanResult, gate: dict[str, Any] | None = None) -> str:
@@ -30,6 +31,27 @@ def render_text(result: ScanResult, gate: dict[str, Any] | None = None) -> str:
     lines.append("Limits: Signals are not proof of working CI, test coverage, or security; use dedicated tools.")
     return "\n".join(lines)
 
+
+
+def render_summary(result: ScanResult, gate: dict[str, Any]) -> str:
+    """Show the actual gate and a bounded set of actionable missing signals."""
+    critical = [c for c in result.failed_checks if c.severity == Severity.CRITICAL]
+    warnings = sum(c.severity == Severity.WARNING for c in result.failed_checks)
+    info = sum(c.severity == Severity.INFO for c in result.failed_checks)
+    lines = ["Local checklist (not an audit)",
+             f"Score: {result.score:g}/10  Gate: {'PASS' if gate['passed'] else 'FAIL'}",
+             *textwrap.wrap(f"Policy: min {gate['min_score']!r}/10; fail: {gate['fail_on']}", width=38)]
+    if critical:
+        lines.append("Critical signals missing:")
+        for check in critical[:3]:
+            lines.extend(textwrap.wrap(check.title, width=38, initial_indent="- ", subsequent_indent="  "))
+        if len(critical) > 3:
+            lines.append(f"- +{len(critical) - 3} more critical")
+    else:
+        lines.append("Critical signals missing: 0")
+    lines.append(f"Other missing: {warnings} warning, {info} info")
+    lines.append("Details: use --format text or json")
+    return "\n".join(lines)
 
 def render_json(result: ScanResult, gate: dict[str, Any] | None = None) -> str:
     payload = {
