@@ -98,3 +98,71 @@ def test_symlinked_candidate_directory_is_ignored(tmp_path: Path) -> None:
     result = cli(tmp_path)
     check = next(c for c in json.loads(result.stdout)["checks"] if c["id"] == "ci")
     assert result.returncode == 1 and not check["passed"]
+
+
+def test_nested_test_files_are_discovered_without_following_symlinks(tmp_path: Path) -> None:
+    nested = tmp_path / "tests" / "unit"
+    nested.mkdir(parents=True)
+    (nested / "test_example.py").write_text("def test_example(): pass\n")
+    (nested / "cycle").symlink_to(tmp_path / "tests", target_is_directory=True)
+    result = cli(tmp_path)
+    check = next(c for c in json.loads(result.stdout)["checks"] if c["id"] == "tests")
+    assert check["passed"] and check["evidence"] == "tests/unit/test_example.py"
+    assert "execution and coverage not verified" in check["message"]
+    (nested / "test_example.py").unlink()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "test_outside.py").write_text("def test_x(): pass\n")
+    (nested / "linked").symlink_to(outside, target_is_directory=True)
+    result = cli(tmp_path)
+    check = next(c for c in json.loads(result.stdout)["checks"] if c["id"] == "tests")
+    assert not check["passed"]
+
+
+def test_usage_heading_variants_and_substrings(tmp_path: Path) -> None:
+    for heading in ("Getting started", "Quick start", "Quickstart", "Start with a local clip"):
+        (tmp_path / "README.md").write_text(f"# Project\n\n## {heading}\n\nexample\n")
+        result = cli(tmp_path)
+        check = next(c for c in json.loads(result.stdout)["checks"] if c["id"] == "usage-docs")
+        assert check["passed"] and check["evidence"] == "README.md", heading
+    for heading in ("Unused", "Uninstall", "Getting startedness", "Quick starter", "Start without setup"):
+        (tmp_path / "README.md").write_text(f"## {heading}\n")
+        result = cli(tmp_path)
+        checks = {c["id"]: c for c in json.loads(result.stdout)["checks"]}
+        assert not checks["usage-docs"]["passed"] and not checks["install-docs"]["passed"], heading
+
+
+def test_recursive_discovery_depth_and_shared_read_limits(tmp_path: Path) -> None:
+    deep = tmp_path / "tests"
+    for _ in range(6):
+        deep /= "nested"
+    deep.mkdir(parents=True)
+    result = cli(tmp_path)
+    assert result.returncode == 2 and "depth" in json.loads(result.stdout)["error"]["message"]
+    # Move the deeply nested directory out of the search roots before testing both roots' shared budget.
+    (tmp_path / "tests").rename(tmp_path / "other")
+    for root_name in ("test", "tests"):
+        directory = tmp_path / root_name
+        directory.mkdir()
+        for i in range(51):
+            (directory / f"test_{i:03}.py").touch()
+    result = cli(tmp_path)
+    assert result.returncode == 2 and "candidate reads" in json.loads(result.stdout)["error"]["message"]
+
+
+def test_recursive_discovery_entry_limit(tmp_path: Path) -> None:
+    directory = tmp_path / "tests" / "nested"
+    directory.mkdir(parents=True)
+    for i in range(2000):
+        (directory / f"file_{i:04}").touch()
+    result = cli(tmp_path)
+    assert result.returncode == 2 and "entries" in json.loads(result.stdout)["error"]["message"]
+
+
+def test_recursive_discovery_byte_budget(tmp_path: Path) -> None:
+    directory = tmp_path / "tests"
+    directory.mkdir()
+    for i in range(5):
+        (directory / f"test_{i}.py").write_bytes(b" " * 1_048_576)
+    result = cli(tmp_path)
+    assert result.returncode == 2 and "read limit" in json.loads(result.stdout)["error"]["message"]

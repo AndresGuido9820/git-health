@@ -7,6 +7,10 @@ from pathlib import Path
 
 MAX_FILE_BYTES = 1_048_576
 MAX_DIRECTORY_ENTRIES = 2000
+MAX_TEST_DEPTH = 5
+MAX_TEST_ENTRIES = 2000
+MAX_TEST_READS = 100
+MAX_TEST_BYTES = 4_194_304
 
 
 class FileScanError(ValueError):
@@ -29,7 +33,7 @@ def safe_parts(root: Path, path: Path) -> bool:
     return True
 
 
-def read_candidate(root: Path, path: Path) -> str | None:
+def read_candidate(root: Path, path: Path, budget: list[int] | None = None) -> str | None:
     if not safe_parts(root, path):
         return None
     try:
@@ -40,11 +44,14 @@ def read_candidate(root: Path, path: Path) -> str | None:
             os.close(fd)
             return None
         with os.fdopen(fd, "rb") as file:
-            if info.st_size > MAX_FILE_BYTES:
-                raise FileScanError(f"File exceeds {MAX_FILE_BYTES} bytes: {path}")
-            data = file.read(MAX_FILE_BYTES + 1)
-            if len(data) > MAX_FILE_BYTES:
-                raise FileScanError(f"File exceeds {MAX_FILE_BYTES} bytes: {path}")
+            limit = min(MAX_FILE_BYTES, budget[0]) if budget is not None else MAX_FILE_BYTES
+            if info.st_size > limit:
+                raise FileScanError(f"File exceeds read limit of {limit} bytes: {path}")
+            data = file.read(limit + 1)
+            if len(data) > limit:
+                raise FileScanError(f"File exceeds read limit of {limit} bytes: {path}")
+            if budget is not None:
+                budget[0] -= len(data)
     except OSError as exc:
         raise FileScanError(f"Cannot read {path}: {exc.strerror}") from exc
     return data.decode("utf-8", errors="replace")
@@ -78,4 +85,44 @@ def matching_file(root: Path, directory: str, pattern: str) -> str | None:
             relative = str(Path(directory) / name)
             if nonempty(root, (relative,)):
                 return relative
+    return None
+
+
+def find_test_file(root: Path, pattern: str) -> str | None:
+    """Search both test roots with shared entry, depth, file and byte budgets."""
+    entries_seen = 0
+    reads = 0
+    budget = [MAX_TEST_BYTES]
+    pending = [(root / name, 0) for name in ("test", "tests")]
+    while pending:
+        directory, depth = pending.pop()
+        if not safe_parts(root, directory):
+            continue
+        try:
+            if not directory.is_dir():
+                continue
+            with os.scandir(directory) as entries:
+                children = []
+                for entry in entries:
+                    entries_seen += 1
+                    if entries_seen > MAX_TEST_ENTRIES:
+                        raise FileScanError(f"Test discovery exceeds {MAX_TEST_ENTRIES} entries")
+                    children.append(entry)
+            for entry in sorted(children, key=lambda item: item.name):
+                if entry.is_symlink():
+                    continue
+                path = directory / entry.name
+                if entry.is_dir(follow_symlinks=False):
+                    if depth >= MAX_TEST_DEPTH:
+                        raise FileScanError(f"Test discovery exceeds depth {MAX_TEST_DEPTH}: {path}")
+                    pending.append((path, depth + 1))
+                elif re.fullmatch(pattern, entry.name, re.IGNORECASE) and entry.is_file(follow_symlinks=False):
+                    reads += 1
+                    if reads > MAX_TEST_READS:
+                        raise FileScanError(f"Test discovery exceeds {MAX_TEST_READS} candidate reads")
+                    text = read_candidate(root, path, budget)
+                    if text and text.strip():
+                        return str(path.relative_to(root))
+        except OSError as exc:
+            raise FileScanError(f"Cannot inspect {directory}: {exc.strerror}") from exc
     return None

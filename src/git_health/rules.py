@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from git_health.fs import matching_file, nonempty, read_candidate
+from git_health.fs import find_test_file, matching_file, nonempty, read_candidate
 from git_health.models import CheckResult, Severity
 
 README_FILES = ("README.md", "README.rst", "README.txt")
@@ -14,7 +14,7 @@ Predicate = Callable[[Path], str | None]
 
 def readme_heading(root: Path, words: str) -> str | None:
     # Recognize a whole-word heading or line, rather than substrings such as uninstall.
-    pattern = re.compile(rf"(?im)^\s*(?:#{{1,6}}\s*)?(?:{words})\s*:?[ \t]*$")
+    pattern = re.compile(rf"(?im)^[ \t]*(?:#{{1,6}}[ \t]+)?(?:{words})[ \t]*:?[ \t]*$")
     for name in README_FILES:
         text = read_candidate(root, root / name)
         if text and pattern.search(text):
@@ -34,16 +34,6 @@ def pr_template(root: Path) -> str | None:
         if found:
             return found
     return None
-
-
-def first(*predicates: Predicate) -> Predicate:
-    def find(root: Path) -> str | None:
-        for predicate in predicates:
-            found = predicate(root)
-            if found:
-                return found
-        return None
-    return find
 
 
 def files(*names: str) -> Predicate:
@@ -93,9 +83,8 @@ def default_rules() -> tuple[Rule, ...]:
              directory_file(".github/workflows", r".+\.ya?ml")),
         Rule("tests", "Test file", "engineering", 10, critical,
              "Nonempty test file candidate found; execution and coverage not verified.",
-             "Add and run tests in test/ or tests/.", first(
-                 directory_file("tests", r"(test_.+\.py|.+_test\.py|.+\.(test|spec)\.[cm]?[jt]sx?)"),
-                 directory_file("test", r"(test_.+\.py|.+_test\.py|.+\.(test|spec)\.[cm]?[jt]sx?)"))),
+             "Add and run tests in test/ or tests/.",
+             lambda root: find_test_file(root, r"(test_.+\.py|.+_test\.py|.+\.(test|spec)\.[cm]?[jt]sx?)")),
         Rule("gitignore", "Gitignore", "engineering", 5, warning, "Nonempty .gitignore found; patterns not verified.",
              "Add a .gitignore for local artifacts.", files(".gitignore")),
         Rule("security", "Security policy", "community", 5, warning,
@@ -106,8 +95,10 @@ def default_rules() -> tuple[Rule, ...]:
              "Add an Install or Installation heading to the README.",
              lambda root: readme_heading(root, "install|installation|instalacion")),
         Rule("usage-docs", "Usage heading", "documentation", 8, critical, "Usage heading found; examples not verified.",
-             "Add a Usage, Example, or Quickstart heading to the README.",
-             lambda root: readme_heading(root, "usage|uso|example|examples|ejemplo|quickstart")),
+             "Add a Usage, Example, Quickstart, or Getting started heading to the README.",
+             lambda root: readme_heading(
+                 root, r"usage|uso|example|examples|ejemplo|quick[ \t]*start|getting[ \t]+started|"
+                 r"start[ \t]+with[ \t]+\S[^\n]*")),
         Rule("changelog", "Changelog", "maintenance", 3, info, "Nonempty changelog found; content not verified.",
              "Consider a changelog for release history.", files("CHANGELOG.md", "HISTORY.md", "RELEASES.md")),
     )
