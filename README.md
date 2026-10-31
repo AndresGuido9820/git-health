@@ -1,113 +1,54 @@
 # git-health
 
-[![CI](https://github.com/AndresGuido9820/git-health/actions/workflows/ci.yml/badge.svg)](https://github.com/AndresGuido9820/git-health/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+A small local checklist for maintainers preparing a Git repository for contributors. It looks for a limited set of GitHub-oriented files and README headings, reports the paths it found, and can fail a CI job when selected signals are missing.
 
-CLI para auditar la salud open source de repositorios Git.
+The score measures **only these checklist signals**. It does not establish software quality, working CI, test coverage, license validity, security, or contribution readiness. A workflow candidate is not parsed or run. This is not a secret scanner; use a dedicated secret scanner and review tracked files separately. The tool inspects the working tree, including untracked and ignored files, not the contents of a Git commit.
 
-`git-health` revisa si un proyecto tiene los archivos y senales basicas que hacen que un repositorio sea confiable, mantenible y facil de contribuir: README, licencia, CI, tests, plantillas de issues, plantilla de PR, guia de contribucion y mas.
+## Install
 
-## Por que existe
-
-Muchos repositorios tienen buen codigo, pero son dificiles de evaluar, instalar o contribuir porque les faltan piezas basicas de mantenimiento. `git-health` convierte esas senales en un checklist accionable con score y recomendaciones.
-
-## Instalacion
-
-Desde el repositorio local:
+Requires Python 3.10+ and Git. From a clone of this repository:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e .
 ```
 
-## Uso
+## Usage
 
-Escanear el repositorio actual:
+From the root of a Git working tree:
 
 ```bash
 git-health scan .
 ```
 
-Escanear otro proyecto:
+Missing signals include a suggested next step. Found signals include a path and say what remains unverified. For a compact checklist and gate result, use:
 
 ```bash
-git-health scan ../mi-proyecto
+git-health scan . --format summary
 ```
 
-Salida JSON para CI, bots o dashboards:
+The summary shows up to three missing critical signals, counts remaining warnings and informational signals, and points to the full text or JSON report. It uses the same score, gate options, and exit codes as the other formats. For automation:
 
 ```bash
-git-health scan . --format json
+git-health scan . --format json --min-score 7 --fail-on critical
 ```
 
-Salida esperada en texto:
+The JSON response contains `root`, `score`, `summary`, `checks`, `gate`, and `limits`. Each check has a `passed` boolean, severity, recommendation, and an `evidence` path or null. A passing check means a named signal was found, not that its contents are correct.
 
-```txt
-Git Health Score: 7.6/10
-Repo: /home/user/project
+The default gate requires a score of at least 7 out of 10 **and** no missing critical signals. Change the threshold with `--min-score` (0–10) and the severity with `--fail-on critical|warning|info|none`. Severity includes higher severities: `warning` fails for missing warning or critical signals; `info` fails for any missing signal; `none` disables severity gating. Both conditions must pass. Exit codes are 0 for a passing gate, 1 for a failed gate, and 2 for invalid input or a scan error. With `--format json`, errors are JSON objects on stdout, for example `{"error":{"code":"scan_error","message":"..."}}`; text errors go to stderr.
 
-OK   README                 El proyecto tiene README.
-WARN Contribucion           Agrega CONTRIBUTING.md con flujo de fork, ramas, commits y PRs.
-OK   CI                     El proyecto tiene GitHub Actions.
+For example, a missing README, license, test file, or GitHub workflow candidate fails the default gate. Add the relevant files, run your tests and workflow independently, then rerun the scan. A passing checklist does not prove those commands work. If a signal does not apply to your project, review the results and select an appropriate gate explicitly; there is no per-check exclusion yet.
 
-Recommended next steps:
-1. Agrega CONTRIBUTING.md con flujo de fork, ramas, commits y PRs.
-```
+## Scope and limits
 
-Forma de la salida JSON (recortada):
+- The path must be the root of a non-bare Git working tree; it may contain uncommitted files. GitHub issue/PR templates and workflows are recognized in the locations checked by this tool, not every hosting provider's conventions.
+- Checks require nonempty regular files. Tests are recognized by common Python and JavaScript/TypeScript test filenames under `test/` or `tests/`, including nested directories; test contents and execution are not validated. Workflow and issue-template candidates are selected by extension and nonempty content, not syntax or behavior.
+- README installation and usage checks recognize standalone headings/lines such as `Install`, `Installation`, `Usage`, `Example`, `Quickstart`, `Quick start`, `Getting started`, or `Start with …` in README.md, README.rst, or README.txt. They do not validate instructions or examples. Headings in other forms or languages may be missed.
+- Candidate files and directory components that are symbolic links are ignored; the selected root itself is resolved. Each candidate read is limited to 1 MiB, and each inspected directory to 2,000 entries. Recursive test discovery shares limits across both roots: 2,000 entries, five directory levels below a test root, 100 candidate reads, and 4 MiB of candidate data. Discovery stops after finding a signal; hitting a limit or an unreadable candidate stops the scan with an error instead of silently passing. These precautions are not a security boundary against a concurrently changing hostile filesystem.
+- Citation metadata is not scored; it is not applicable to every project. Scores and check IDs may change while this project is in alpha.
 
-```json
-{
-  "root": "/home/user/project",
-  "score": 7.6,
-  "summary": {"total": 14, "passed": 11, "failed": 3},
-  "checks": [
-    {
-      "id": "readme",
-      "title": "README",
-      "category": "presentation",
-      "passed": true,
-      "weight": 12,
-      "severity": "critical",
-      "message": "El proyecto tiene README.",
-      "recommendation": "Agrega un README con descripcion, instalacion y ejemplo de uso."
-    }
-  ]
-}
-```
-
-## Checks iniciales
-
-- README
-- LICENSE
-- CONTRIBUTING.md
-- Plantilla de pull request
-- Plantillas de issues
-- GitHub Actions
-- Tests
-- .gitignore
-- SECURITY.md
-- CITATION.cff
-- Seccion de instalacion en README
-- Ejemplo de uso en README
-- CHANGELOG.md
-- Archivos sensibles obvios
-
-## Arquitectura
-
-```txt
-src/git_health/
-├── cli.py        # interfaz de comandos
-├── fs.py         # helpers seguros de filesystem
-├── models.py     # objetos de dominio
-├── reporters.py  # salida texto y JSON
-├── rules.py      # catalogo de reglas
-└── scanner.py    # orquestacion del analisis
-```
-
-La CLI no conoce los detalles de cada regla. Las reglas producen resultados de dominio y los reporters deciden como presentarlos. Esto permite agregar salida JSON, nuevos comandos o reglas por lenguaje sin reescribir el nucleo.
-
-## Desarrollo
+## Development
 
 ```bash
 pip install -e ".[dev]"
@@ -115,12 +56,4 @@ ruff check .
 pytest
 ```
 
-## Roadmap
-
-- Comando `git-health fix` para crear plantillas faltantes.
-- Checks especificos para Python, Node y notebooks.
-- Integracion con GitHub API para leer topics, descripcion y releases.
-
-## Contribuir
-
-Lee [CONTRIBUTING.md](CONTRIBUTING.md) para configurar el entorno local y proponer cambios.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow.

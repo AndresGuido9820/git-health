@@ -1,13 +1,47 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from git_health.fs import exists_any, file_contains, glob_any, has_pull_request_template
+from git_health.fs import find_test_file, matching_file, nonempty, read_candidate
 from git_health.models import CheckResult, Severity
 
-Predicate = Callable[[Path], bool]
+README_FILES = ("README.md", "README.rst", "README.txt")
+Predicate = Callable[[Path], str | None]
+
+
+def readme_heading(root: Path, words: str) -> str | None:
+    # Recognize a whole-word heading or line, rather than substrings such as uninstall.
+    pattern = re.compile(rf"(?im)^[ \t]*(?:#{{1,6}}[ \t]+)?(?:{words})[ \t]*:?[ \t]*$")
+    for name in README_FILES:
+        text = read_candidate(root, root / name)
+        if text and pattern.search(text):
+            return name
+    return None
+
+
+def pr_template(root: Path) -> str | None:
+    for directory in (".", "docs", ".github"):
+        found = matching_file(root, directory, r"pull_request_template\.md")
+        if found:
+            return found
+        found = matching_file(root, f"{directory}/PULL_REQUEST_TEMPLATE", r".+\.md")
+        if found:
+            return found
+        found = matching_file(root, f"{directory}/pull_request_template", r".+\.md")
+        if found:
+            return found
+    return None
+
+
+def files(*names: str) -> Predicate:
+    return lambda root: nonempty(root, names)
+
+
+def directory_file(directory: str, pattern: str) -> Predicate:
+    return lambda root: matching_file(root, directory, pattern)
 
 
 @dataclass(frozen=True)
@@ -22,165 +56,49 @@ class Rule:
     predicate: Predicate
 
     def evaluate(self, root: Path) -> CheckResult:
-        return CheckResult(
-            id=self.id,
-            title=self.title,
-            category=self.category,
-            passed=self.predicate(root),
-            weight=self.weight,
-            severity=self.severity,
-            success_message=self.success_message,
-            recommendation=self.recommendation,
-        )
+        evidence = self.predicate(root)
+        return CheckResult(self.id, self.title, self.category, bool(evidence), self.weight,
+                           self.severity, self.success_message, self.recommendation, evidence)
 
 
 def default_rules() -> tuple[Rule, ...]:
+    critical, warning, info = Severity.CRITICAL, Severity.WARNING, Severity.INFO
     return (
-        Rule(
-            id="readme",
-            title="README",
-            category="presentation",
-            weight=12,
-            severity=Severity.CRITICAL,
-            success_message="El proyecto tiene README.",
-            recommendation="Agrega un README con descripcion, instalacion y ejemplo de uso.",
-            predicate=lambda root: exists_any(root, ("README.md", "README.rst", "README.txt")),
-        ),
-        Rule(
-            id="license",
-            title="Licencia",
-            category="trust",
-            weight=10,
-            severity=Severity.CRITICAL,
-            success_message="El proyecto declara licencia.",
-            recommendation="Agrega LICENSE para aclarar como puede usarse el codigo.",
-            predicate=lambda root: exists_any(root, ("LICENSE", "LICENSE.md", "COPYING")),
-        ),
-        Rule(
-            id="contributing",
-            title="Guia de contribucion",
-            category="community",
-            weight=8,
-            severity=Severity.WARNING,
-            success_message="El proyecto explica como contribuir.",
-            recommendation="Agrega CONTRIBUTING.md con flujo de fork, ramas, commits y PRs.",
-            predicate=lambda root: exists_any(root, ("CONTRIBUTING.md", ".github/CONTRIBUTING.md")),
-        ),
-        Rule(
-            id="pr-template",
-            title="Plantilla de PR",
-            category="community",
-            weight=6,
-            severity=Severity.WARNING,
-            success_message="El proyecto tiene plantilla de pull request.",
-            recommendation="Agrega una plantilla de PR en la raiz, docs/ o .github/; admite PULL_REQUEST_TEMPLATE/.",
-            predicate=has_pull_request_template,
-        ),
-        Rule(
-            id="issue-templates",
-            title="Plantillas de issues",
-            category="community",
-            weight=6,
-            severity=Severity.WARNING,
-            success_message="El proyecto tiene plantillas de issues.",
-            recommendation="Agrega plantillas para bugs, features o propuestas.",
-            predicate=lambda root: glob_any(root, ".github/ISSUE_TEMPLATE/*"),
-        ),
-        Rule(
-            id="ci",
-            title="Integracion continua",
-            category="engineering",
-            weight=12,
-            severity=Severity.CRITICAL,
-            success_message="El proyecto tiene GitHub Actions.",
-            recommendation="Agrega un workflow que ejecute tests o validaciones basicas.",
-            predicate=lambda root: glob_any(root, ".github/workflows/*.yml")
-            or glob_any(root, ".github/workflows/*.yaml"),
-        ),
-        Rule(
-            id="tests",
-            title="Tests",
-            category="engineering",
-            weight=10,
-            severity=Severity.CRITICAL,
-            success_message="El proyecto tiene tests.",
-            recommendation="Agrega tests pequenos para el comportamiento principal.",
-            predicate=lambda root: exists_any(root, ("tests", "test")) or glob_any(root, "**/test_*.py"),
-        ),
-        Rule(
-            id="gitignore",
-            title="Gitignore",
-            category="engineering",
-            weight=5,
-            severity=Severity.WARNING,
-            success_message="El proyecto ignora artefactos locales.",
-            recommendation="Agrega .gitignore para caches, entornos virtuales y archivos generados.",
-            predicate=lambda root: (root / ".gitignore").exists(),
-        ),
-        Rule(
-            id="security",
-            title="Politica de seguridad",
-            category="trust",
-            weight=5,
-            severity=Severity.WARNING,
-            success_message="El proyecto tiene politica de seguridad.",
-            recommendation="Agrega SECURITY.md con instrucciones para reportar vulnerabilidades.",
-            predicate=lambda root: exists_any(root, ("SECURITY.md", ".github/SECURITY.md")),
-        ),
-        Rule(
-            id="citation",
-            title="Citacion",
-            category="trust",
-            weight=4,
-            severity=Severity.INFO,
-            success_message="El proyecto tiene metadatos de citacion.",
-            recommendation="Agrega CITATION.cff si el repo es academico o investigativo.",
-            predicate=lambda root: (root / "CITATION.cff").exists(),
-        ),
-        Rule(
-            id="install-docs",
-            title="Instalacion documentada",
-            category="documentation",
-            weight=8,
-            severity=Severity.CRITICAL,
-            success_message="El README incluye instalacion.",
-            recommendation="Agrega una seccion de instalacion con comandos copiables.",
-            predicate=lambda root: file_contains(
-                root / "README.md",
-                ("install", "instalar", "pip install", "npm install", "docker run"),
-            ),
-        ),
-        Rule(
-            id="usage-docs",
-            title="Uso documentado",
-            category="documentation",
-            weight=8,
-            severity=Severity.CRITICAL,
-            success_message="El README incluye ejemplo de uso.",
-            recommendation="Agrega un ejemplo minimo de ejecucion y salida esperada.",
-            predicate=lambda root: file_contains(
-                root / "README.md",
-                ("usage", "uso", "quickstart", "ejemplo", "example"),
-            ),
-        ),
-        Rule(
-            id="changelog",
-            title="Changelog",
-            category="maintenance",
-            weight=3,
-            severity=Severity.INFO,
-            success_message="El proyecto documenta cambios.",
-            recommendation="Agrega CHANGELOG.md para registrar versiones y mejoras.",
-            predicate=lambda root: exists_any(root, ("CHANGELOG.md", "HISTORY.md", "RELEASES.md")),
-        ),
-        Rule(
-            id="sensitive-files",
-            title="Archivos sensibles",
-            category="security",
-            weight=3,
-            severity=Severity.CRITICAL,
-            success_message="No se detectaron archivos sensibles obvios.",
-            recommendation="No subas .env ni llaves privadas; usa .env.example.",
-            predicate=lambda root: not exists_any(root, (".env", "id_rsa", "id_ed25519")),
-        ),
+        Rule("readme", "README", "documentation", 12, critical, "Nonempty README found.",
+             "Add a nonempty README.md, README.rst, or README.txt.", files(*README_FILES)),
+        Rule("license", "License file", "community", 10, critical, "Nonempty license file found; terms not verified.",
+             "Add a license file with the terms for reuse.", files("LICENSE", "LICENSE.md", "COPYING")),
+        Rule("contributing", "Contribution guide", "community", 8, warning,
+             "Nonempty contribution guide found; content not verified.",
+             "Add a CONTRIBUTING.md guide.", files("CONTRIBUTING.md", ".github/CONTRIBUTING.md")),
+        Rule("pr-template", "Pull request template", "community", 6, warning, "Nonempty PR template found.",
+             "Add a Markdown PR template at the root, docs/, or .github/.", pr_template),
+        Rule("issue-templates", "Issue template", "community", 6, warning,
+             "Nonempty GitHub issue template candidate found; content not verified.",
+             "Add a Markdown or YAML issue template under .github/ISSUE_TEMPLATE/.",
+             directory_file(".github/ISSUE_TEMPLATE", r".+\.(md|yml|yaml)")),
+        Rule("ci", "Workflow file", "engineering", 12, critical,
+             "Nonempty GitHub workflow candidate found; syntax and execution not verified.",
+             "Add and verify a GitHub Actions workflow under .github/workflows/.",
+             directory_file(".github/workflows", r".+\.ya?ml")),
+        Rule("tests", "Test file", "engineering", 10, critical,
+             "Nonempty test file candidate found; execution and coverage not verified.",
+             "Add and run tests in test/ or tests/.",
+             lambda root: find_test_file(root, r"(test_.+\.py|.+_test\.py|.+\.(test|spec)\.[cm]?[jt]sx?)")),
+        Rule("gitignore", "Gitignore", "engineering", 5, warning, "Nonempty .gitignore found; patterns not verified.",
+             "Add a .gitignore for local artifacts.", files(".gitignore")),
+        Rule("security", "Security policy", "community", 5, warning,
+             "Nonempty security policy file found; content not verified.",
+             "Add SECURITY.md with a vulnerability reporting process.", files("SECURITY.md", ".github/SECURITY.md")),
+        Rule("install-docs", "Installation heading", "documentation", 8, critical,
+             "Installation heading found; instructions not verified.",
+             "Add an Install or Installation heading to the README.",
+             lambda root: readme_heading(root, "install|installation|instalacion")),
+        Rule("usage-docs", "Usage heading", "documentation", 8, critical, "Usage heading found; examples not verified.",
+             "Add a Usage, Example, Quickstart, or Getting started heading to the README.",
+             lambda root: readme_heading(
+                 root, r"usage|uso|example|examples|ejemplo|quick[ \t]*start|getting[ \t]+started|"
+                 r"start[ \t]+with[ \t]+\S[^\n]*")),
+        Rule("changelog", "Changelog", "maintenance", 3, info, "Nonempty changelog found; content not verified.",
+             "Consider a changelog for release history.", files("CHANGELOG.md", "HISTORY.md", "RELEASES.md")),
     )
