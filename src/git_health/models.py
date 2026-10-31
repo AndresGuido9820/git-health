@@ -20,6 +20,7 @@ class CheckResult:
     severity: Severity
     success_message: str
     recommendation: str
+    evidence: str | None = None
 
 
 @dataclass(frozen=True)
