@@ -8,6 +8,11 @@ from git_health.fs import exists_any, file_contains, glob_any, has_pull_request_
 from git_health.models import CheckResult, Severity
 
 Predicate = Callable[[Path], bool]
+README_FILES = ("README.md", "README.rst", "README.txt")
+
+
+def readme_contains(root: Path, terms: tuple[str, ...]) -> bool:
+    return any(file_contains(root / name, terms) for name in README_FILES)
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,7 @@ def default_rules() -> tuple[Rule, ...]:
             severity=Severity.CRITICAL,
             success_message="El proyecto tiene README.",
             recommendation="Agrega un README con descripcion, instalacion y ejemplo de uso.",
-            predicate=lambda root: exists_any(root, ("README.md", "README.rst", "README.txt")),
+            predicate=lambda root: exists_any(root, README_FILES),
         ),
         Rule(
             id="license",
@@ -145,8 +150,8 @@ def default_rules() -> tuple[Rule, ...]:
             severity=Severity.CRITICAL,
             success_message="El README incluye instalacion.",
             recommendation="Agrega una seccion de instalacion con comandos copiables.",
-            predicate=lambda root: file_contains(
-                root / "README.md",
+            predicate=lambda root: readme_contains(
+                root,
                 ("install", "instalar", "pip install", "npm install", "docker run"),
             ),
         ),
@@ -158,8 +163,8 @@ def default_rules() -> tuple[Rule, ...]:
             severity=Severity.CRITICAL,
             success_message="El README incluye ejemplo de uso.",
             recommendation="Agrega un ejemplo minimo de ejecucion y salida esperada.",
-            predicate=lambda root: file_contains(
-                root / "README.md",
+            predicate=lambda root: readme_contains(
+                root,
                 ("usage", "uso", "quickstart", "ejemplo", "example"),
             ),
         ),

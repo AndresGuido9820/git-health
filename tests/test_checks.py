@@ -76,3 +76,26 @@ def test_directory_with_default_template_name_is_not_a_template(tmp_path: Path) 
     result = scan_repository(tmp_path)
 
     assert not next(check for check in result.checks if check.id == "pr-template").passed
+
+
+@pytest.mark.parametrize("filename", ["README.md", "README.rst", "README.txt"])
+def test_readme_documentation_checks_support_each_format(tmp_path: Path, filename: str) -> None:
+    (tmp_path / filename).write_text("Install\n pip install demo\nUsage\n demo run\n")
+
+    result = scan_repository(tmp_path)
+
+    checks = {check.id: check.passed for check in result.checks}
+    assert checks["readme"]
+    assert checks["install-docs"]
+    assert checks["usage-docs"]
+
+
+def test_readme_documentation_checks_do_not_pass_without_terms(tmp_path: Path) -> None:
+    (tmp_path / "README.rst").write_text("A project description.\n")
+
+    result = scan_repository(tmp_path)
+
+    checks = {check.id: check.passed for check in result.checks}
+    assert checks["readme"]
+    assert not checks["install-docs"]
+    assert not checks["usage-docs"]
